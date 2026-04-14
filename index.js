@@ -87,9 +87,22 @@ app.post('/api/generate-code', async (req, res) => {
   const { deviceId } = req.body;
   if (!deviceId) return res.status(400).json({ error: "Device ID required." });
 
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
-
   try {
+    const device = await db.collection('devices').doc(deviceId).get();
+    if (device.exists && device.data().chatId) {
+      return res.status(400).json({ error: "Device is already paired!" });
+    }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Clean up any previously generated un-used pair codes for this device to prevent clutter
+    const prevCodes = await db.collection('pairCodes').where('deviceId', '==', deviceId).get();
+    const batch = db.batch();
+    prevCodes.forEach(doc => {
+      batch.delete(doc.ref);
+    });
+    await batch.commit();
+
     await db.collection('pairCodes').doc(code).set({
       deviceId,
       createdAt: admin.firestore.FieldValue.serverTimestamp()
