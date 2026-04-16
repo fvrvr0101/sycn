@@ -3,6 +3,9 @@ const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
 const TelegramBot = require('node-telegram-bot-api');
+const multer = require('multer');
+const fs = require('fs');
+const upload = multer({ dest: 'uploads/' });
 
 const app = express();
 app.use(cors());
@@ -205,6 +208,48 @@ app.post('/api/notifications', async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed forwarding." });
+  }
+});
+
+app.post('/api/recordings', upload.single('document'), async (req, res) => {
+  if (!db || !bot) return res.status(500).json({ error: "Server missing DB or Bot." });
+
+  const { deviceId, phoneNumber, timestamp } = req.body;
+  const file = req.file;
+
+  if (!deviceId || !file) {
+    return res.status(400).json({ error: "Missing deviceId or file." });
+  }
+
+  try {
+    const deviceDoc = await db.collection('devices').doc(deviceId).get();
+    if (!deviceDoc.exists) {
+      if (file) fs.unlinkSync(file.path);
+      return res.status(401).json({ error: "Device not paired." });
+    }
+
+    const chatId = deviceDoc.data().chatId;
+    if (chatId) {
+      const caption = `🎙 *Call Recording*\n\n📞 Number: ${phoneNumber || 'Unknown'}\n🕐 Time: ${timestamp || 'Unknown'}`;
+      
+      await bot.sendDocument(chatId, file.path, {
+        caption: caption,
+        parse_mode: 'Markdown'
+      }, {
+        filename: file.originalname,
+        contentType: 'audio/mpeg'
+      });
+
+      fs.unlinkSync(file.path); // Delete temp file
+      res.json({ success: true });
+    } else {
+      if (file) fs.unlinkSync(file.path);
+      res.status(401).json({ error: "No Chat ID." });
+    }
+  } catch (error) {
+    console.error("Recording forward error:", error);
+    if (file) fs.unlinkSync(file.path);
+    res.status(500).json({ error: "Failed forwarding recording." });
   }
 });
 
